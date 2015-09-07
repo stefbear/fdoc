@@ -2,7 +2,28 @@
 
  /**
    * @file
-   * This Drupal module provides an interface for adding new content-type from a variety
+   * This Drupal module provides a user friendly interface for adding new content-type from a variety
    * of formatted documents. 
-   * File formats and documents supported as of Sept 9:
+   * File types and documents supported as of Sept 7: Adobe Acrobat (PDF)
    */
+   
+/**
+ * Implements hook_help().
+ *
+ * Displays help and module information.
+ *
+ * @param path 
+ *   Which path of the site we're using to display help
+ * @param arg 
+ *   Array that holds the current path as returned from arg() function
+ */
+function fdoc_help($path, $arg) {
+  switch ($path) {
+    // Drupal 7:
+    case 'admin/help#fdoc':
+    // Drupal 8
+    // case 'help.page.content_translation':
+      $output = '<p>' . t("Provides a user friendly interface for adding new content-type from a variety of formatted documents.") . '</p>';
+      return $output;
+  }
+} 

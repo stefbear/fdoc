@@ -1,0 +1,3 @@
+name = fdoc	
+description = A Drupal module, which provides a user friendly interface for adding new content-type from a variety of formatted documents.
+core = 7.x
