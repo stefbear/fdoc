@@ -1,0 +1,8 @@
+<?php
+
+ /**
+   * @file
+   * This Drupal module provides an interface for adding new content-type from a variety
+   * of formatted documents. 
+   * File formats and documents supported as of Sept 9:
+   */
