@@ -2,12 +2,26 @@
 
  /**
    * @file
-   * This Drupal module provides a user friendly interface for adding new content-type from a variety
-   * of formatted documents. 
-   * File types and documents supported as of Sept 7: Adobe Acrobat (PDF)
+   * This Drupal module provides a user friendly interface for adding new content-type
+   * from a formatted document source and encapsulating it in a custom page node type. 
+   *    
+   * File types and documents supported (pre-alpha status) as of Sept 10
+   *   Images:     jpg jpeg gif png
+   *   Plain text: txt, csv
+   *   Markup:     html, htm
+   *   Adobe:      pdf 																 
+   *   MS Office:  doc docx xls ppt pps
+   *   OpenOffice: odt ods odp
+   *   
    */
-   
+
+define('MAX_FILE_SIZE', 10*1024*1024, true);
+
 /**
+ * 
+ * @defgroup fdoc
+ * @{
+ *
  * Implements hook_help().
  *
  * Displays help and module information.
@@ -23,7 +37,309 @@ function fdoc_help($path, $arg) {
     case 'admin/help#fdoc':
     // Drupal 8
     // case 'help.page.content_translation':
-      $output = '<p>' . t("Provides a user friendly interface for adding new content-type from a variety of formatted documents.") . '</p>';
+      $output = '<p>' . t("Provides a user friendly interface for adding new content-type from a variety of formatted documents and encapsulating it in a custom page node type.") . '</p>';
       return $output;
   }
-} 
+}
+
+/**
+ * Implements hook_node_info().
+ * 
+ * Provide name and description for the node type.
+ */
+function fdoc_node_info() {
+  return array(
+    'fdoc' => array(
+      'name' => t('Add content from source ...'),
+      'base' => 'fdoc',
+      'description' => t('Creates new content from a richly formatted document and encapsulates it in a page node for display or editing.'),
+	  'title_label' => t('Page Title'),
+      // set the 'locked' attribute to TRUE, so users won't be
+      // able to change the machine name of our content type.
+      'locked' => TRUE,
+    ),
+  );
+}
+
+/**
+ * Implements hook_form()
+ *
+ * Form for the node type.
+ *
+ */
+function fdoc_form($node, $form_state) {
+  $type = node_type_get_type($node);
+  $form = array();
+    
+  if(!isset($_SESSION['uploadedfile'])) {
+    // Loop over any field instances attached to the fdoc
+    // content type (such as the body field) and delete them individually.
+    // do not delete field itself since fields defined in any module
+    // can be added to any node type by individual users
+    $instance = field_info_instance('node', 'body', 'fdoc');  
+    field_delete_instance($instance);
+	//todo: find an alternative method of hiding the body field since this
+    //   	method will remove past instance as well
+  
+    $form['fileops']['fileops_file'] = array(
+      '#type' => 'managed_file',
+      //'#default_value' => $default_file,
+	  //'#upload_location' => 'public://',
+      '#title' => t('Upload a file or document.<br>Currently supported file types are: jpg, jpeg, png, gif, txt, csv, html, htm, pdf, doc, docx, xls, ppt, pps, odt, ods, odp.<br>Maximum file size: @filesize MB.', array('@filesize' => MAX_FILE_SIZE/1024/1024)),
+      //'#description' => t('Upload a file or document. Currently supported file types are: jpg, jpeg, png, gif, txt, csv, html, htm, pdf, doc, docx, xls, ppt, pps, odt, ods, odp. Maximum file size: @filesize MB.', array('@filesize' => MAX_FILE_SIZE/1024/1024)),
+	  '#required' => TRUE,
+	  '#upload_validators' => array('file_validate_extensions' => array('png gif jpg jpeg txt csv html htm pdf doc docx xls ppt pps odt ods odp'),
+									      'file_validate_size' => array(MAX_FILE_SIZE)),	
+	  '#process' => array('fdoc_my_file_element_process'),
+    );
+	
+    $form['fileops']['read_submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Upload and view/edit content'),
+      '#submit' => array('fdoc_fileupload_submit'),
+	  '#validate' => array('fdoc_fileupload_validate'),
+	  //'#disabled' => TRUE,
+    );
+  }
+  else {
+	$file = $_SESSION['uploadedfile'];
+	
+    //add title field
+    $form['title'] = array(
+      '#type' => 'textfield',
+      '#title' => check_plain($type->title_label),
+      '#required' => TRUE,
+      '#default_value' => $file->uri,	  
+      '#maxlength' => 255,
+      '#weight' => -5,
+    );
+	
+	// Add the body field
+    $field = field_info_field('body');
+    $instance = field_info_instance('node', 'body', 'fdoc');
+    if (empty($field)) {
+      $field = array(
+        'field_name' => 'body',	  
+        'type' => 'text_with_summary',
+		'label' => '',
+        'entity_types' => array('node'),
+      );
+      $field = field_create_field($field);
+    }
+    if (empty($instance)) {
+      $instance = array(
+        'field_name' => 'body',
+        'entity_type' => 'node',
+        'bundle' => $type->type,
+        'label' => '',
+        'widget' => array('type' => 'text_textarea_with_summary'), //'text_summary_or_trimmed',
+        'settings' => array('display_summary' => TRUE),
+        'display' => array(
+          'default' => array(
+            'label' => 'hidden',
+            'type' => 'text_default',
+          ),
+          'teaser' => array(
+            'label' => 'hidden',
+            'type' => 'text_summary_or_trimmed',
+          ),
+        ),
+      ); 
+      $instance = field_create_instance($instance);
+    }
+	
+	//add cancel button that removes the reference to the recently uploaded file and
+    //triggers the removal/hiding the body element
+	$form['cancel'] = array(
+      '#type' => 'submit', 
+      '#value' => t('Cancel'), 
+      '#weight' => 15, 
+      '#submit' => array('fdoc_node_form_cancel_submit'),
+    );
+	
+	//determine mime type of uploaded file and parse content
+	$body_text = determine_parser_for_file($file);
+		
+	//assign content to body field, make sure we are viewing full html
+	$node->language = 'en';
+    $field_langcode = field_language('node', $node, 'body');	
+	$node->body[$field_langcode][0]['format']  = 'full_html';//filter_default_format();
+    $node->body[$field_langcode][0]['value'] = $body_text;
+    //$node->body[$field_langcode][0]['summary'] = text_summary($body_text);
+  }
+  
+  //append custom handler for submit button (for clean up purposes)
+  $form['#submit'][] = '_form_submit';
+    
+  return $form;
+}
+
+/**
+ *
+ * Upload a file to Drupal and if supported store it
+ * physically and with a reference in the database
+ *
+ * Validate handler for $form['fileops']['read_submit'].
+ *
+ */
+function fdoc_fileupload_validate($form, &$form_state) {
+  $file = file_save_upload('fileops_file', array(
+    // Validates file is supported
+    'file_validate_extensions' => array('png gif jpg jpeg txt csv html htm pdf doc docx xls ppt pps odt ods odp'),
+	'file_validate_size' => array(MAX_FILE_SIZE),
+  ));
+	
+  // If the file passed validation:
+  if ($file) {
+    // Move the file into the Drupal file system.
+    if ($file = file_move($file, 'public://')) {	
+      // Save the file for use in the submit handler.
+      $form_state['storage']['file'] = $file;		  
+    }
+    else {
+	  //file can't be moved to the site's site folder
+      form_set_error('file', t("Failed to write the uploaded file to the site's file folder."));
+    }
+  }
+  else {
+    //Notify user file is unsupported
+	//<---not necessary since built into managed_file api
+    //form_set_error('file', t('No file was uploaded because the file type is currently unsupported.'));	
+  }  
+}
+
+/**
+ * Submit handler for $form['fileops']['read_submit'].
+ *
+ * Move the uploaded file to permanent storage.
+ *
+ */
+function fdoc_fileupload_submit($form, &$form_state) {
+  $file = $form_state['storage']['file'];
+  unset($form_state['storage']['file']);
+  
+  // make the storage of the file permanent.
+  $file->status = FILE_STATUS_PERMANENT;
+  
+  // save file status
+  file_save($file);  
+  
+  //todo: remove feedback
+  drupal_set_message(t('The file has been uploaded and saved, filename: @filename.', array('@filename' => $file->filename)));
+  drupal_set_message(t('uri: @uri.', array('@uri' => $file->uri)));
+  drupal_set_message(t('filemime: @filemime.', array('@filemime' => $file->filemime)));
+  drupal_set_message(t('filesize: @filesize.', array('@filesize' => $file->filesize)));
+ 
+  //store file object for later use
+  $_SESSION['uploadedfile'] = $file;  
+}
+
+/**
+  * Reset session variables and cleanup forms
+  *
+  */
+function cleanup() {
+  $_SESSION['uploadedfile'] = NULL;
+   
+  //todo: delete uploaded file from public folder
+}
+
+/**
+  * If the user clicks the Cancel button 
+  * we need to delete all added content and reset our 
+  * reference to the uploaded file
+  *
+  *
+  */
+function fdoc_node_form_cancel_submit($form, &$form_state) {
+  // reset session variable(s)
+  cleanup();
+  
+  // return to an existing page (not necessarily where we came from)
+  $link = '';
+  $path = 'node';
+  if('user_profile_form' == $form['#form_id']){
+    $path = 'user';
+  }
+  if(arg(1) == 'add') {
+    // If adding entity link to [user|node]/add screen
+    $link = $path . '/add';
+  }
+  elseif(arg(2) == 'edit') {
+    // If editing entity, link to node view screen
+    $link = $path . '/' . arg(1);
+  }
+		
+  $url = isset($_GET['destination']) ? $_GET['destination'] : $link;
+  drupal_goto($url); 
+}
+
+
+/**
+ *
+ * Hide upload button for managed_file field type
+ *
+ */ 
+function fdoc_my_file_element_process($element, &$form_state, $form) {
+  $element = file_managed_file_process($element, $form_state, $form);
+  $element['upload_button']['#access'] = FALSE;
+  return $element;
+}
+
+/**
+  * Custom submit handler for fdoc_form().
+  *
+  */
+function _form_submit($form, &$form_state) {
+  cleanup();  
+}
+
+/**
+  * Choose a parser depending on mime type of uploaded file 
+  * and return content as string for editing.
+  *
+  */
+function determine_parser_for_file($file){
+  $mime = $file->filemime;
+  switch ($mime) {
+    //text
+    case 'text/plain':
+      module_load_include('inc', 'fdoc', 'fdoc.txt');
+	  return parse($file);	  	  
+	case 'text/csv':     
+      module_load_include('inc', 'fdoc', 'fdoc.csv');
+	  return parse($file);	  	  
+	case 'text/html':     
+      module_load_include('inc', 'fdoc', 'fdoc.html');
+	  return parse($file);
+    case 'image/jpeg':   
+	  //image	
+      module_load_include('inc', 'fdoc', 'fdoc.jpg');
+	  return process($file);
+    case 'image/png':     
+      module_load_include('inc', 'fdoc', 'fdoc.png');
+	  return process($file);
+    case 'image/gif':     
+      module_load_include('inc', 'fdoc', 'fdoc.gif');
+	  return process($file);	  
+	case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':     
+	  //docx
+      module_load_include('inc', 'fdoc', 'fdoc.docx');
+	  return process($file); 
+    case 'application/msword':     
+	  //doc	  
+      //module_load_include('inc', 'fdoc', 'fdoc.doc');
+	  return 'Not implemented yet. Use .docx file format for rudimentary support.'; 	  
+	case 'application/pdf':     
+	  //pdf
+      module_load_include('inc', 'fdoc', 'fdoc.pdf');
+	  return process($file);	  
+	default:
+	  //we haven't dealt with that mime type yet
+	  return t('Not implemented yet.');
+  }
+}
+
+/**
+ * @} End of "defgroup fdoc".
+ */
