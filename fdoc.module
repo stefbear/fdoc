@@ -50,7 +50,7 @@ function fdoc_help($path, $arg) {
 function fdoc_node_info() {
   return array(
     'fdoc' => array(
-      'name' => t('Add content from source ...'),
+      'name' => t('Content from source ...'),
       'base' => 'fdoc',
       'description' => t('Creates new content from a richly formatted document and encapsulates it in a page node for display or editing.'),
 	  'title_label' => t('Page Title'),
@@ -72,34 +72,30 @@ function fdoc_form($node, $form_state) {
   $form = array();
     
   if(!isset($_SESSION['uploadedfile'])) {
-    // Loop over any field instances attached to the fdoc
-    // content type (such as the body field) and delete them individually.
-    // do not delete field itself since fields defined in any module
-    // can be added to any node type by individual users
-    $instance = field_info_instance('node', 'body', 'fdoc');  
-    field_delete_instance($instance);
-	//todo: find an alternative method of hiding the body field since this
-    //   	method will remove past instance as well
-  
-    $form['fileops']['fileops_file'] = array(
-      '#type' => 'managed_file',
-      //'#default_value' => $default_file,
-	  //'#upload_location' => 'public://',
-      '#title' => t('Upload a file or document.<br>Currently supported file types are: jpg, jpeg, png, gif, txt, csv, html, htm, pdf, doc, docx, xls, ppt, pps, odt, ods, odp.<br>Maximum file size: @filesize MB.', array('@filesize' => MAX_FILE_SIZE/1024/1024)),
-      //'#description' => t('Upload a file or document. Currently supported file types are: jpg, jpeg, png, gif, txt, csv, html, htm, pdf, doc, docx, xls, ppt, pps, odt, ods, odp. Maximum file size: @filesize MB.', array('@filesize' => MAX_FILE_SIZE/1024/1024)),
-	  '#required' => TRUE,
-	  '#upload_validators' => array('file_validate_extensions' => array('png gif jpg jpeg txt csv html htm pdf doc docx xls ppt pps odt ods odp'),
-									      'file_validate_size' => array(MAX_FILE_SIZE)),	
-	  '#process' => array('fdoc_my_file_element_process'),
-    );
+    // hide the body field if it was previously created and rendered unless we are editing  
+	if (arg(2) != 'edit') {
+      hide($form['body']);    
+		
+      $form['fileops']['fileops_file'] = array(
+        '#type' => 'managed_file',
+        //'#default_value' => $default_file,
+	    //'#upload_location' => 'public://',
+        '#title' => t('Upload a file or document.<br>Currently supported file types are: jpg, jpeg, png, gif, txt, csv, html, htm, pdf, doc, docx, xls, ppt, pps, odt, ods, odp.<br>Maximum file size: @filesize MB.', array('@filesize' => MAX_FILE_SIZE/1024/1024)),
+        //'#description' => t('Upload a file or document. Currently supported file types are: jpg, jpeg, png, gif, txt, csv, html, htm, pdf, doc, docx, xls, ppt, pps, odt, ods, odp. Maximum file size: @filesize MB.', array('@filesize' => MAX_FILE_SIZE/1024/1024)),
+	    '#required' => TRUE,
+	    '#upload_validators' => array('file_validate_extensions' => array('png gif jpg jpeg txt csv html htm pdf doc docx xls ppt pps odt ods odp'),
+		   							        'file_validate_size' => array(MAX_FILE_SIZE)),	
+	    '#process' => array('fdoc_my_file_element_process'),
+      );
 	
-    $form['fileops']['read_submit'] = array(
-      '#type' => 'submit',
-      '#value' => t('Upload and view/edit content'),
-      '#submit' => array('fdoc_fileupload_submit'),
-	  '#validate' => array('fdoc_fileupload_validate'),
-	  //'#disabled' => TRUE,
-    );
+      $form['fileops']['read_submit'] = array(
+        '#type' => 'submit',
+        '#value' => t('Upload and view/edit content'),
+        '#submit' => array('fdoc_fileupload_submit'),
+	    '#validate' => array('fdoc_fileupload_validate'),
+	    //'#disabled' => TRUE,
+      );
+	}
   }
   else {
 	$file = $_SESSION['uploadedfile'];
